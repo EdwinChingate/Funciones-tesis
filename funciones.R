@@ -19,6 +19,23 @@ emptyHoodMod <- function(object, pos, n, m, x, y){
   if(length(freenb)==0){return(NULL)}else{return(freenb)}
 }
 
+emptyHoodMod2 <- function(object, pos, n, m, x, y){
+  xp = c(x-1,x,x+1)
+  yp = c(y-2,y-1,y)
+  xp=ifelse(xp<=0,NA,xp)
+  xp=na.omit(ifelse(xp>n,NA,xp))
+  yp=ifelse(yp<=0,NA,yp)
+  yp=na.omit(ifelse(yp>m,NA,yp))
+  #xp = xp[xp>0 & xp<=n]
+  #xp = xp[yp>0 & yp<=m]
+  nb=sapply(xp,function(x,y){return(paste(x,y,sep='_'))},y=yp)
+  pos = pos[which(pos$x %in% xp),]
+  pos = pos[which(pos$y %in% yp),]
+  freenb=setdiff(nb,paste(pos$x,pos$y,sep='_'))
+  if(length(freenb)==0){return(NULL)}else{return(freenb)}
+}
+
+
 chemotaxisMod <- function(object, population, j, chemo){
 	popvec <- population@orgdat[j,]
 	attract <- population@media[[chemo]]@diffmat
@@ -55,9 +72,10 @@ estimate_lrw <- function(grid_n, grid_m){
   return(lrw)
 }
 
-simEnvMod<-function(object, time, lrw=NULL, continue=FALSE, reduce=FALSE, diffusion=TRUE, diff_par=FALSE, cl_size=2, sec_obj="none", cutoff=1e-6, pcut=1e-6, with_shadow=FALSE, verbose=TRUE,potspace,guardar,res,vecb,E0,bf){
+simEnvMod<-function(object, time, lrw=NULL, continue=FALSE, reduce=FALSE, diffusion=TRUE, diff_par=FALSE, cl_size=2, sec_obj="none", cutoff=1e-6, pcut=1e-6, with_shadow=FALSE, verbose=TRUE,potspace,guardar,res,vecb,E0,bf,bdes){
 celdas<-0*potspace
 celdas[1,]=10
+corriente<-0
 #La matriz que maneja el potencial en el medio
 
 	if(length(object@media)==0) stop("No media present in Arena!")
@@ -117,8 +135,6 @@ if(sum(celdas[yp[1:2],xp])>0)
 #La escencia del biofilm. Si el potencial en dirección al electrodo cerca de una celula es alto, se establece una red y el biofilm crece, porque la celula tiene la capacidad de conducir
 
 }
-BF<-matrix(nrow=time,ncol=1,0)
-corriente=0
 		#Se crean los directorios para guardar la información de la simulación 
 		#Para guardar la información de cada sustancia en el medio
 		rutaS<-paste(guardar,'/sustrato',sep='')
@@ -176,36 +192,61 @@ i=0
 #Importante revisar		#Se almacena el dato de unicamente la concentración promedio, pero seria mejor crear una carpeta para cada sustancia y tener toda la información en todo el espacio
 				close(file)
 			}
-
-	rem<-optimizeLP(arena@specs[[arena@orgdat[j,'type']]])
-	flu<-rem[[1]]$fluxes
+	sublb <- arena@sublb
+	upbnd<-arena@specs[[arena@orgdat[1,'type']]]@ubnd
+	upbnd[['EX_e(e)']]<-1000
+	lb=-sublb[1,arena@specs[[arena@orgdat[1,'type']]]@medium]
+	lobnd <- arena@specs[[arena@orgdat[1,'type']]]@lbnd
+	reacts<-unique(arena@specs[[arena@orgdat[1,'type']]]@medium)
+	lobnd[reacts]<- ifelse(lb<=lobnd[reacts], lobnd[reacts], lb)
+	#print(lobnd[reacts])
+	#print(upbnd[reacts])
+	#print(upbnd)
+	#print(lobnd)
+	upbnd[['Biomass']]<-1e-6
+	rem<-optimizeLP(arena@specs[[arena@orgdat[1,'type']]],sec_obj='mtf', 	ub=upbnd,lb=lobnd,j=1)[[1]]$fluxes
+	#print(rem[reacts])
+	#print(rem['Biomass'])
+	flu<-rem
 	flu2<-flu
-	for ( x in 1:100){
+
+
+	for ( x in 1:1000){
 	flu<-cbind(flu,flu2)}
+
+	contE<-matrix(nrow=1000,ncol=1,0)
+
 
 	for(i in 1:time){
 
+matSusF<-0*potspace
+corriente<-0
+celdas[1,]=10
 #Debo revisar detenidamente que hace esta parte del codigo
     		init_t <- proc.time()[3]
+
 		sublb <- arena@sublb
+#print('content')
+#print(sublb[,'EX_ac__40__e__41__'])
     		if(nrow(arena@orgdat) > 1){
 			new_ind = sample(1:nrow(arena@orgdat),nrow(arena@orgdat)) #shuffle through all bacteria to increase randomness
       			arena@orgdat = arena@orgdat[new_ind,]
-
 			sublb = sublb[new_ind,] #apply shuffeling also to sublb to ensure same index as orgdat
 		}
-		if(verbose) cat("\niteration:", i, "\t organisms:",nrow(arena@orgdat), "\t biomass:", sum(arena@orgdat$biomass), "pg \n")
+		#if(verbose) cat("\niteration:", i, "\t organisms:",nrow(arena@orgdat), "\t biomass:", sum(arena@orgdat$biomass), "pg \n")
 		org_stat <- sapply(seq_along(arena@specs), function(x){dim(arena@orgdat[which(arena@orgdat$type==x),])[1]})
 		if(length(arena@specs) > 0){
 			old_biomass<-biomass_stat
 			biomass_stat <- sapply(seq_along(arena@specs), function(x){sum(arena@orgdat$biomass[which(arena@orgdat$type==x)])})
       			org_stat <- cbind(org_stat, biomass_stat, 100*(biomass_stat-old_biomass)/old_biomass); rownames(org_stat) <- names(arena@specs); colnames(org_stat) <- c("count", "biomass", "%")
-      			if(verbose) print(org_stat)}
+      			#if(verbose) print(org_stat)
+}
     		arena@mflux <- lapply(arena@mflux, function(x){numeric(length(x))}) # empty mflux pool
     		arena@shadow <-lapply(arena@shadow, function(x){numeric(length(x))}) # empty shadow pool
     		if(nrow(arena@orgdat) > 0){ # if there are organisms left
       			org.count <- nrow(arena@orgdat)
 			#Aquí se analiza cada microorganismos, uno por uno
+print(i*arena@tstep)
 		        for(j in 1:org.count){ # for each organism in arena
         			if(!verbose) cat("\rOrganims",j,"/",org.count) #Para no mostrar el conteo de todos los microorganismos
 			        org <- arena@specs[[arena@orgdat[j,'type']]]
@@ -216,17 +257,20 @@ i=0
 L<-length(arena@media)
 m<-arena@m
 n<-arena@n
-				matSusF=array(dim=c(m,n,L),0)
+				#matSusF=array(dim=c(m,n,L),0)
 
 bioM<-arena@orgdat[j,'biomass']
 if (bioM>0){
-
+#print(Sys.time())
+#print(arena@orgdat[j,])
         			switch(class(org),
 					#La variable sublb se modifica dentro de la función, el potencial que siente la celula se define por la
-          			     "Bac"= {arena = simBacMod(org, arena, j, sublb, bacnum, sec_obj=sec_obj, cutoff=cutoff, pcut=pcut, with_shadow=with_shadow,potencial=potencial,corriente=corriente,potspace=potspace,E0=E0,bf=bf,matSusF,celdas=celdas,flu=flu,i=i)}, #the sublb matrix will be modified within this function
+          			     "Bac"= {arena = simBacMod(org, arena, j, sublb, bacnum, sec_obj=sec_obj, cutoff=cutoff, pcut=pcut, with_shadow=with_shadow,potencial=potencial,corriente=corriente,potspace=potspace,E0=E0,bf=bf,matSusF=matSusF,celdas=celdas,flu=flu,i=i,contE=contE,rem=rem)}, #the sublb matrix will be modified within this function
 			             "Human"= {arena = simHum(org, arena, j, sublb, bacnum, sec_obj=sec_obj, cutoff=cutoff, pcut=pcut, with_shadow=with_shadow)}, #the sublb matrix will be modified within this function
               			stop("Simulation function for Organism object not defined yet."))
 
+#print('alfinal')
+#print(sublb[,'EX_ac__40__e__41__'])
 }
 			      }
 			 test <- is.na(arena@orgdat$biomass)
@@ -242,7 +286,6 @@ for (cf in 1:length(potspace[1,]))
 #print(maxbf)
 #print(max(maxbf))
 Lbf<-round(max(maxbf))
-BF[i]<-Lbf
     if(diffusion && !arena@stir){
       if(diff_par){
         diff_t <- system.time(arena <- diffuse_parMod(arena, cluster_size=cl_size, lrw=lrw, sublb=sublb) )[3]
@@ -266,6 +309,7 @@ BF[i]<-Lbf
 	arena@sublb <- getSublb(arena)
 #}
 }
+
     }
     if(!diffusion){
       if(nrow(sublb)>0){
@@ -277,7 +321,7 @@ BF[i]<-Lbf
       }
       
     }
-if (i%%res ==FALSE)
+if (i%%1 ==FALSE)
 {
     if(arena@stir){ #stir environment -> random movement of bacteria + perfect diffusion #Mezcla perfecta
       sublb_tmp = arena@orgdat[,c("x","y")]
@@ -289,26 +333,26 @@ if(arena@media[[sub]]@id=='EX_ac__40__e__41__'){
         submat[sublb[,c("y","x")]] <- sublb[,'EX_ac__40__e__41__']
 	dx<-arena@Lx/arena@n
 	Cmat<-Matrix::Matrix(submat, sparse=TRUE)
-	Cmat[1:(Lbf+1),]<-estadoestable(C=Cmat[1:(Lbf+1),],J=matSusF[,,'EX_ac__40__e__41__'],D=arena@media[['EX_ac__40__e__41__']]@difspeed,dx=dx)
+	Cmat[1:(Lbf+1),]<-estadoestable(C=Cmat[1:(Lbf+1),],J=matSusF[1:(Lbf+1),],D=arena@media[['EX_ac__40__e__41__']]@difspeed,dx=dx)
 va=31059-m
 	solucion<-Cmat[(Lbf+1):m,]
         sumc <- sum(solucion) #sum of all concentrations
 	largo<-length(solucion[,1])
 	ancho<-length(solucion[1,])
         meanc <- sumc/(largo*ancho)
-	sumt<-sumc+20*va*ancho+sum(Cmat[Lbf,])
+	sumt<-sumc+Cmat[m,n]*va*ancho+sum(Cmat[Lbf,])
 	meant<-sumt/((largo+va+1)*ancho)
-	Cmat[Lbf:m,]<-meant
+	Cmat[Lbf:m,]<-meanc
 	arena@media[['EX_ac__40__e__41__']]@diffmat<-Cmat
 	arena@sublb <- getSublb(arena)
 }
-else{
-        sumc = sum(arena@media[[sub]]@diffmat) #sum of all concentrations
-        meanc = sumc/(arena@n*arena@m) #mean per grid cell
-        conc = ((sumc-(meanc*nrow(sublb)))+sum(sublb[,sub]))/(arena@n*arena@m) #remove concentrations where bacteria are sitting + add the current concentration in their position
-        arena@media[[sub]]@diffmat = Matrix::Matrix(conc,nrow=arena@m,ncol=arena@n,sparse=TRUE) #create matrix with homogen concentration
-        sublb_tmp[,sub] = conc #create a new sublb matrix
-      }
+#else{
+      #  sumc = sum(arena@media[[sub]]@diffmat) #sum of all concentrations
+      #  meanc = sumc/(arena@n*arena@m) #mean per grid cell
+      #  conc = ((sumc-(meanc*nrow(sublb)))+sum(sublb[,sub]))/(arena@n*arena@m) #remove concentrations where bacteria are sitting + add the current concentration in their position
+      #  arena@media[[sub]]@diffmat = Matrix::Matrix(conc,nrow=arena@m,ncol=arena@n,sparse=TRUE) #create matrix with homogen concentration
+      #  sublb_tmp[,sub] = conc #create a new sublb matrix
+      #}
 }
  for(j in 1:length(arena@orgdat[,1])){
 org <- arena@specs[[arena@orgdat[j,'type']]]
@@ -323,9 +367,28 @@ if (bioM>0){
 }
 }
     }
-
+}
+else{
+arena@media[['EX_ac__40__e__41__']]@diffmat[sublb[,c("y","x")]]<-sublb[,'EX_ac__40__e__41__']
 arena@sublb <- getSublb(arena)
 }
+
+numerodebichos<-length(arena@orgdat[arena@orgdat[,'biomass']>0,'biomass'])
+#print(arena@orgdat[arena@orgdat[,'biomass']>0,])
+#print(numerodebichos)
+celdes<-round(bdes*numerodebichos*arena@tstep)
+maxy<-max(arena@orgdat[,'y'])
+desata<-sample(rownames(arena@orgdat[arena@orgdat[,'y']>(maxy-5),]),celdes)
+arena@orgdat[desata,'biomass']<-0
+arena@orgdat[desata,c('x','y')]<-1
+#print('eliminar')
+#print(celdes)
+#print(bdes*sum(arena@orgdat[,'biomass']))
+#print('biomasa')
+#print(sum(arena@orgdat[,'biomass']))
+#print('elegidos')
+#print(desata)
+#arena@sublb <- getSublb(arena)
 #Para evitar que se pierda el gradiente y la chemotaxis funciones
 
 #for (co in 1:m){
@@ -345,8 +408,10 @@ arena@sublb <- getSublb(arena)
 #Calculos para estimar la eficiencia coulumbimetrica y la corriente
 if (i%%res ==FALSE)
 {
-#print(arena@media[['EX_ac__40__e__41__']]@diffmat)	
-print(Sys.time())
+#print(arena@media[['EX_ac__40__e__41__']]@diffmat)
+#print(i*arena@tstep)	
+#print(Sys.time())
+#print(i)
 	pos <- arena@orgdat
 	rutasa<-paste(rutapoMO,'/',toString(i),'.csv',sep='')
 	write.table(pos,file=rutasa,row.names=FALSE,col.names=FALSE,sep=',')
@@ -357,29 +422,38 @@ print(Sys.time())
 	write.table(potspace,file=rutpsT,row.names=FALSE,col.names=FALSE,sep=',')
 	#corriente<-Farad*arena@n*arena@m*(mean(arena@media[['EX_e(e)']]@diffmat)-sumelec)/arena@tstep/3600*1e-6
 	file<-file(paste(guardar,'/Corriente.csv',sep=''),'a')
-	writeLines(paste(toString(arena@tstep*(i)),toString(corriente),sep=' '),file)
+	writeLines(paste(toString(arena@tstep*(i)),toString(corriente),toString(Lbf),toString(celdes),toString(length(arena@orgdat[arena@orgdat[,'biomass']>0,'biomass'])),sep=','),file)
 	close(file)
 			m='\t biomass, type, phenotype, x, y '
 			#Se crea un archivo para almacenar toda la información de todos los microorganismos
   pos <- arena@orgdat[,c('x','y')]
 
 
-			for (x in 1:length(arena@orgdat[,1])){
+			for (x in rownames(arena@orgdat[arena@orgdat[,'biomass']>0,])){
+
  xb=pos[x,1]
  yb=pos[x,2]
-				file2=file(paste(rutaMO,'/',toString(rownames(arena@orgdat[toString(x),])),'.csv',sep=''),'a')
-				writeLines(paste(toString(arena@tstep*(i)),',',toString(arena@orgdat[toString(x),]),',',toString(potspace[yb,xb]),sep=' '),file2)
+
+	rutaMet<-paste(rutaMO,'/',toString(rownames(arena@orgdat[x,])),sep='')
+dir.create(rutaMet)	
+rutaMetp<-paste(rutaMet,'/',toString(i),'.csv',sep='')
+write.table(cbind(names(flu[,as.integer(rownames(arena@orgdat[x,]))]),flu[,as.integer(rownames(arena@orgdat[x,]))]),file=rutaMetp,row.names=FALSE,col.names=FALSE,sep=',')
+
+
+
+				file2=file(paste(rutaMO,'/',toString(rownames(arena@orgdat[x,])),'.csv',sep=''),'a')
+				writeLines(paste(toString(arena@tstep*(i)),',',toString(arena@orgdat[x,]),',',toString(potspace[yb,xb]),sep=''),file2)
 				close(file2)
 				#Se van conectando, para guardarlo en un solo archivo simlist
-				m=paste(m,paste(toString(rownames(arena@orgdat[toString(x),])),',',toString(arena@orgdat[toString(x),]),',',toString(potspace[yb,xb]),sep=''),sep='\n')
+				m=paste(m,paste(toString(rownames(arena@orgdat[x,])),',',toString(arena@orgdat[x,]),',',toString(potspace[yb,xb]),sep=''),sep='\n')
 			}
 			#El archivo lleva el conteo de los microorganismos presentes hasta ese momento
-			file=file(paste(rutasim,'/',toString(i),'-MO',toString(length(arena@orgdat[,1])),'.csv',sep=''),'a')
+			file=file(paste(rutasim,'/',toString(arena@tstep*i),'-MO',toString(length(arena@orgdat[arena@orgdat[,'biomass']>0,'biomass'])),'.csv',sep=''),'a')
 			writeLines(m,file)	
 			close(file)
 #Importante revisar	#Se guarda la suma de toda la biomasa, pero se deberia diferenciar por tipo de microorganismo
-			file3=file(paste(rutaMO,'/BO','.csv',sep=''),'a')
-			writeLines(paste(toString(arena@tstep*(i)),toString(sum(arena@orgdat[,'biomass'])) ,toString(length(arena@orgdat[,'biomass'])),str=' '),file3)	
+			file3=file(paste(rutaMO,'/BO.csv',sep=''),'a')
+			writeLines(paste(toString(arena@tstep*(i)),',',toString(sum(arena@orgdat[,'biomass'])),',',toString(length(arena@orgdat[arena@orgdat[,'biomass']>0,'biomass'])),str=','),file3)	
 			close(file3)
 			for (x in arena@media)	{
 				file=file(paste(rutaS,'/',x@name,'.csv',sep=''),'a')	
@@ -432,6 +506,7 @@ print(Sys.time())
 #print(potspace)
 #print(celdas)
 #print(Bacte)
+#print(arena@orgdat)
 	evaluation=Eval(arena)
     if(reduce && i<time){evaluation = redEval(evaluation)}
     if(nrow(arena@orgdat)==0 && !continue){
@@ -439,18 +514,19 @@ print(Sys.time())
       break
     }
     step_t <- proc.time()[3] - init_t
-    if(verbose) cat("\ttime total: ", round(step_t,3), "\tdiffusion: ", round(diff_t,3), " (", 100*round(diff_t/step_t,3),"%)\n" )
+    #if(verbose) cat("\ttime total: ", round(step_t,3), "\tdiffusion: ", round(diff_t,3), " (", 100*round(diff_t/step_t,3),"%)\n" )
   }
-print(BF)
   return(evaluation)
 }
 estadoestable <- function(C,J,D,dx)
-	{
+	{	
 		m<-length(C[,1])
 		n<-length(C[1,])
 		mat<-matrix(nrow=m+1,ncol=n+2,0)
 		mat[2:(m+1),2:(n+1)]<-matrix(C,nrow=m,ncol=n)
 		er<-1
+#print(mat)
+#print(J)
 		#while(er>1e-10)
 		for (te in 1:20)
 			{	
@@ -458,29 +534,41 @@ estadoestable <- function(C,J,D,dx)
 				#C[m,]<-C[m-1,]
 				mat[,1]<-mat[,2]
 				mat[,n+2]<-mat[,n+1]
-				Cold<-mat
+				Cold=mat
+#print(mat)
 				for (i in 2:m)
 					{
-						for (j in 2:n+1)
+						for (j in 2:(n+1))
 							{
-								mat[i,j]<-1/4*(mat[i-1,j]+mat[i+1,j]+mat[i,j+1]+mat[i,j-1])
-#print(i)
-#print(j)
-#print(C[i,j])
+								mat[i,j]<-1/4*(Cold[i-1,j]+Cold[i+1,j]+Cold[i,j+1]+Cold[i,j-1]+J[i-1,j-1])
 							}	
 					}
 
 				#print(C)
 				er<-sum(((Cold-mat)/mat)^2)
 			}
-print(er)
+#print(er)
 #print(C)
 #print(J)
 		C<-mat[2:(m+1),2:(n+1)]
 		return(C)
 	}
-simBacMod <-function(object, arena, j, sublb, bacnum, sec_obj="none", cutoff=1e-6, pcut=1e-6, with_shadow=FALSE,potencial=0, corriente=0,potspace,E0,bf,matSusF,celdas,flu,i){
 
+consumeMod<-function(object, sublb, cutoff=1e-6, bacnum, fbasol){
+  #if(fbasol$obj>=cutoff && !is.na(fbasol$obj)){
+    flux = fbasol[object@medium[object@medium !='EX_ac__40__e__41__']] #scale flux to whole population size
+    #flux = na.omit(ifelse(abs(flux)<=cutoff,NA,flux)) ?
+#print(sublb['EX_ac__40__e__41__'])
+    sublb[names(flux)] = round(sublb[names(flux)]+flux, round(-log10(cutoff))) # use cutoff also in this case
+ # }
+
+#print(sublb['EX_ac__40__e__41__'])
+  return(sublb)
+}
+
+simBacMod <-function(object, arena, j, sublb, bacnum, sec_obj="none", cutoff=1e-6, pcut=1e-6, with_shadow=FALSE,potencial=0, corriente=0,potspace,E0,bf,matSusF,celdas,flu,i,contE,rem){
+
+nflu<-flu
 potspa<-potspace
 cells<-celdas
   pos <- arena@orgdat[,c('x','y')]
@@ -512,14 +600,6 @@ else{potspa[cy,cx]<--1000}
 potencial<-potspa[y,x]
 
 }
-consumeMod<-function(object, sublb, cutoff=1e-6, bacnum, fbasol){
-  #if(fbasol$obj>=cutoff && !is.na(fbasol$obj)){
-    flux = fbasol[object@medium] #scale flux to whole population size
-    #flux = na.omit(ifelse(abs(flux)<=cutoff,NA,flux)) ?
-    sublb[names(flux)] = round(sublb[names(flux)]+flux, round(-log10(cutoff))) # use cutoff also in this case
- # }
-  return(sublb)
-}
 const <- constrainMod(object, object@medium, lb=-sublb[j,object@medium], #scale to population size
                      dryweight=arena@orgdat[j,"biomass"], tstep=arena@tstep, scale=arena@scale, j)
     #La función constrain toca revisarla mucho mas detenidamente
@@ -535,29 +615,94 @@ if (object@type == 'geo'){ #Este error no lo recordaba, no me habia pasado antes
 	
 	#print(upbnd[['EX_e(e)']])
 }
+#print(arena@orgdat[j,])
+#print(sublb[j,])
 Dc<-0.00024 #cm
+Dif<-arena@media[['EX_ac__40__e__41__']]@difspeed
 #print(lobnd[['EX_ac__40__e__41__']])
    # upbnd[['EX_e(e)']]<-corriente0/(exp(-38.9*potencial)+1)
 #Para analizar los perfiles metabolicos debo usar la función de sybil directamente!
-if ((i==1) |(i%%500 ==FALSE)){
-  optimization <- optimizeLP(object, lb=lobnd, ub=upbnd, j=j, sec_obj=sec_obj, cutoff=cutoff, with_shadow=with_shadow)[[1]]$fluxes
-  eval.parent(substitute(flu[,j]<-optimization))
+popvec <- arena@orgdat[j,]
+#print('pop')
+#print(popvec)
+#print(j)
+jp<-as.integer(rownames(arena@orgdat[j,]))
+c<-contE[jp]
+    freenb <- emptyHoodMod(object, arena@orgdat[,c('x','y')],
+              arena@n, arena@m, popvec$x, popvec$y)
+#print(freenb)
+ # popvec$biomass >= object@maxweight
+#print(jp)
+#print(freenb)
+#print(arena@orgdat)
+    if(length(freenb) == 0 & popvec$biomass >= object@maxweight/1.05){# & popvec$biomass > object@maxweight){
+
+upbnd[['Biomass']]<-1e-6
+c<-c+1
+nflu[,jp]<-rem
+#print('in')
+}else{
+c<-0}
+if ((i==1) |(i%%10 ==FALSE &upbnd[['Biomass']]>1e-4)){
+#print(upbnd[['Biomass']])
+#print('opt')
+  optimization <- optimizeLP(object, lb=lobnd, 	ub=upbnd, j=j, sec_obj=sec_obj, cutoff=cutoff, with_shadow=with_shadow)[[1]]$fluxes
+  #eval.parent(substitute(flu[,jp]<-optimization))
+nflu[,jp]<-optimization
+
 }
 else{
-optimization<-flu[,j]
+optimization<-nflu[,jp]
 }
+
+eval.parent(substitute(contE[jp]<-c))
+#print(optimization['EX_ac__40__e__41__'])
+#print(optimization['EX_ac__40__e__41__'])
+#print(Dc)
+#print(Dif)
+#print(arena@orgdat[j,'biomass'])
+eval.parent(substitute(matSusF[y,x] <-optimization['EX_ac__40__e__41__']/Dc/1e9/Dif*arena@orgdat[j,"biomass"]))
+
 	miu<-optimization[object@rbiomass]
-    optimization=optimization*arena@orgdat[j,"biomass"]*tstep/(Dc**3/1000)/1e12
+#print(optimization['EX_ac__40__e__41__'])
+    optimization<-optimization*arena@orgdat[j,"biomass"]*tstep/(Dc**3/1000)/1e12
+
 #Esta parte la cambie, sin embargo, toca revisar mas a fondo              #*arena@orgdat[j,"biomass"]/object@cellweight_mean
 #También se debe tener en cuenta el volumen de la celda
   fbasol <- optimization
-  eval.parent(substitute(sublb[j,] <- consumeMod(object, sublb[j,], bacnum=bacnum, fbasol=fbasol, cutoff) )) #scale consumption to the number of cells?
+#print(c(i,j))
+#print('hay')
+#print(sublb[,'EX_ac__40__e__41__'])
+#print(sublb[j,'EX_ac__40__e__41__'])
+#print('come')
+#print(optimization['EX_ac__40__e__41__'])
+#print('biomass')
+#print(miu)
+#print(arena@orgdat[j,])
+#sub <- consumeMod(object, sublb[j,], bacnum=bacnum, fbasol=fbasol, cutoff)
+#print(sub['EX_ac__40__e__41__'])
+#  eval.parent(substitute(sublb[j,] <- sub )) #scale consumption to the number of cells?
+#sublb[j,] <- sub
+#print(sublb[,'EX_ac__40__e__41__'])
+#print('comio')
+#print(sublb[j,'EX_ac__40__e__41__'])
+    if(length(freenb) == 0 & popvec$biomass >= object@maxweight)
+{
+dead<-FALSE 
+}
+else
+{
+dead <- growthMod(object, arena, j, arena@occupyM, fbasol=fbasol, 
+tstep=arena@tstep,celdas=cells,E0=E0,potspace=potspa,miu=miu,flu=nflu)
+}
+
+
+eval.parent(substitute(flu<-nflu))
 
 # for(s in seq_along(arena@media)){	
- # eval.parent(substitute(matSusF[y,x,s] <-fbasol$fluxes[[s]]/tstep))
+
 #}
 
-  dead <- growthMod(object, arena, j, arena@occupyM, fbasol=fbasol, tstep=arena@tstep,celdas=cells,E0=E0,potspace=potspa,miu=miu)
   #arena@orgdat[j,'phenotype'] <- as.integer(checkPhen(arena, org=object, fbasol=fbasol, cutoff=pcut))
 
   type <- object@type
@@ -635,8 +780,21 @@ for (cx in xp){
 else{potspa[cy,cx]<--1000}	
 }
 }
+
+    freenb2 <- emptyHoodMod2(object, arena@orgdat[,c('x','y')],
+              arena@n, arena@m, popvec$x, popvec$y)
+
+if(length(freenb2) != 0){
+      npos = freenb2[sample(length(freenb2),1)]
+      npos = as.numeric(unlist(strsplit(npos,'_')))
+   #   if(occupyM[npos[2], npos[1]] == 0){ # check if there is no obstacle #Por el momento no hay obtaculos en mi ambiente
+        arena@orgdat[j,]$x <- npos[1]
+        arena@orgdat[j,]$y <- npos[2]
 }
 
+
+}
+nflu<-flu
 eval.parent(substitute(celdas<-cells))
 eval.parent(substitute(potspace<-potspa))
 }
@@ -645,19 +803,43 @@ eval.parent(substitute(potspace<-potspa))
 }
 growExpMod<-function(object, biomass, fbasol, tstep,miu){
   growth <-exp(miu*tstep)
-  if(growth > 1){
-    grow_accum <- growth*biomass
-  } else grow_accum <- biomass - object@deathrate*biomass*tstep
+vd<-matrix(nrow=length(fbasol),ncol=1,0)
+s<-sum(fbasol==vd)/length(vd)
+
+  if(s == 1){
+	grow_accum <- biomass - object@deathrate*biomass*tstep
+#print(growth)
+  } else {
+	grow_accum <- growth*biomass
+}
+
   #cat("\t", growth, biomass, grow_accum, "\n")
   return(grow_accum)
 }
-growthMod <-function(object, population, j, occupyM, fbasol, tstep,celdas,potspace,E0,miu){
+
+emptyHoodMod <- function(object, pos, n, m, x, y){
+  xp = c(x-1,x,x+1)
+  yp = c(y-1,y,y+1)
+  xp=ifelse(xp<=0,NA,xp)
+  xp=na.omit(ifelse(xp>n,NA,xp))
+  yp=ifelse(yp<=0,NA,yp)
+  yp=na.omit(ifelse(yp>m,NA,yp))
+  #xp = xp[xp>0 & xp<=n]
+  #xp = xp[yp>0 & yp<=m]
+  nb=sapply(xp,function(x,y){return(paste(x,y,sep='_'))},y=yp)
+  pos = pos[which(pos$x %in% xp),]
+  pos = pos[which(pos$y %in% yp),]
+  freenb=setdiff(nb,paste(pos$x,pos$y,sep='_'))
+  if(length(freenb)==0){return(NULL)}else{return(freenb)}
+}
+
+growthMod <-function(object, population, j, occupyM, fbasol, tstep,celdas,potspace,E0,miu,flu){
 n=population@n
 m=population@m
 cells<-celdas
 potspa<-potspace
   neworgdat <- population@orgdat
-  popvec <- neworgdat[j,]
+  popvec <- neworgdat[j	,]
   switch(object@growtype,
          "linear"= {popvec$biomass <- growLin(object, popvec$biomass, fbasol, tstep)},
          "exponential"= {popvec$biomass <- growExpMod(object, popvec$biomass, fbasol, tstep,miu)},
@@ -666,19 +848,32 @@ potspa<-potspace
   neworgdat[j,'biomass'] <- popvec$biomass
   while( popvec$biomass > object@maxweight ){
   #if(popvec$biomass > object@maxweight){ 
-    freenb <- emptyHood(object, neworgdat[,c('x','y')],
+#print('aqui')
+    freenb <- emptyHoodMod(object, neworgdat[,c('x','y')],
               population@n, population@m, popvec$x, popvec$y)
+#print(freenb)
     if(length(freenb) != 0){
+
+if (length(rownames(neworgdat[neworgdat[,'biomass']==0,]))>0){
+	kO<-sample(rownames(neworgdat[neworgdat[,'biomass']==0,]),1)
+}else{	kO<-nrow(neworgdat)+1}
+
       npos = freenb[sample(length(freenb),1)]
       npos = as.numeric(unlist(strsplit(npos,'_')))
-      if(occupyM[npos[2], npos[1]] == 0){ # check if there is no obstacle
+   #   if(occupyM[npos[2], npos[1]] == 0){ # check if there is no obstacle #Por el momento no hay obtaculos en mi ambiente
         popvec$biomass <- popvec$biomass/2
         daughter <- popvec
         daughter$biomass <- popvec$biomass
         daughter$x <- npos[1]
         daughter$y <- npos[2]
-        neworgdat[nrow(neworgdat)+1,] <- daughter
+#print('aqui')
+        neworgdat[kO,] <- daughter
+	jp<-as.integer(rownames(population@orgdat[j,]))
+#print(c(kO,jp))
+	eval.parent(substitute(flu[,as.integer(kO)]<-flu[,jp]))
         neworgdat[j,'biomass'] <- popvec$biomass
+
+#print(neworgdat)
 if (object@type == 'geo'){
 x <- npos[1]
 y <- npos[2]
@@ -695,7 +890,7 @@ if(sum(cells[yp[1:2],xp])>0)
 	}
 }
 
-      }
+     # }
     }else
       break
   }
@@ -774,10 +969,10 @@ diffuseMod <- function(object, lrw, sublb, verbose=TRUE,matSusF){
       #diff_pde_t <- diff_pde_t + system.time(switch(arena@media[[j]]@difunc,
 
       if(diffspeed || !diff2d){
-j<-'EX_ac__40__e__41__'
+k<-'EX_ac__40__e__41__'
 	dx<-arena@Lx/arena@n
 Cmat<-arena@media[[j]]@diffmat
-	arena@media[[j]]@diffmat<-estadoestable(C=Cmat,J=matSusF[,,j],D=arena@media[[j]]@difspeed,dx=dx)
+	arena@media[[j]]@diffmat<-estadoestable(C=Cmat,J=matSusF[,,k],D=arena@media[[k]]@difspeed,dx=dx)
         #switch(arena@media[[j]]@difunc,
         #       "pde"  = {submat <- diffusePDE(arena@media[[j]], submat, gridgeometry=arena@gridgeometry, lrw, tstep=object@tstep)},
         #       "pde2" = {diffuseSteveCpp(submat, D=arena@media[[j]]@difspeed, h=1, tstep=arena@tstep)},
@@ -963,22 +1158,30 @@ return(x,y)}
 
 constrainMod<-function(object, reacts, lb, dryweight, tstep, scale, j, cutoff=1e-6){
   reacts = unique(reacts)
+#print(reacts)
  Sac<--lb['EX_ac__40__e__41__']
 Km=0.21206000322316076
 qm=7.611210408114023
 #print(Sac)
 Dc<-0.00024 #cm
   lb = 0.8*lb[reacts]/(dryweight*tstep)*Dc**3/1000*1e12
-lb['EX_ac__40__e__41__']<--qm*Sac/(Sac+Km)
+#lb['EX_ac__40__e__41__']<--qm*Sac/(Sac+Km)
 #print(lb['EX_ac__40__e__41__'])
   growth_limit <- (object@maxweight*1.5) - dryweight
   lobnd <- object@lbnd
+lb['EX_ac__40__e__41__']<--qm*Sac/(Sac+Km)
+#print('bicho')
+#print(lobnd['EX_ac__40__e__41__'])
+#print('ambiente')
+#print(lb['EX_ac__40__e__41__'])
   upbnd <- object@ubnd
  #Comparar las cantidades que puede ingerir---hay que mejorarlo, porque solo funciona para cuando hay muy poquito sustrato
     #Comparemos mas bien flujos
-  if(dryweight<Inf){lobnd[reacts] <- object@lbnd[reacts]}#*dryweight*(dryweight/object@cellweight_mean)*tstep} #costrain according to flux definition: mmol/(gDW*hr)
+#  if(dryweight<Inf){lobnd[reacts] <- object@lbnd[reacts]}#*dryweight*(dryweight/object@cellweight_mean)*tstep} #costrain according to flux definition: mmol/(gDW*hr)
   #lobnd[reacts] <- ifelse(lb<=lobnd[reacts], ifelse(lobnd[reacts]==0, lb, lobnd[reacts]), lb) #check if lower bounds in biological relevant range
-  lobnd[reacts] <- ifelse(lb<=lobnd[reacts], lobnd[reacts], lb) #check if lower bounds in biological relevant range
+  lobnd[reacts] <- ifelse(lb<=lobnd[reacts], lobnd[reacts], lb)
+
+ #check if lower bounds in biological relevant range
   lobnd <-lobnd#*growth_limit/1000
   upbnd <-upbnd#*growth_limit/1000
   #if(j==1) browser()

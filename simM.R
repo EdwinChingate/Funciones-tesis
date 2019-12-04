@@ -2,7 +2,7 @@ closeAllConnections()
 rm(list=ls())
 source('funciones.R')
 
-simM<- function (I='1',n=5, m=40, dt=1e-3, t=2e3, bf=1 ,res=1000,nMO=5)
+simM<- function (I='1',n=40, m=60, dt=5, t=3000, bf=1 ,res=1,nMO=40,bdes=0)#3.3e-3)
 { #Todo el codigo se define como una función para facilitar el desarrollo de experimentos
 #Descripción de parámetros: I es para facilitar el nombre del experimento realizado; n y m son el ancho y largo en número de celdas del espacio; dt es el tamaño de paso en la discretización del tiempo (h); t es el número de pasos a desarrollar; bf es el ancho del biofilm en número de celdas; nMO es el número de microorganismos que se especifican inicialmente.
 	#se toma el tiempo en el que inicia la simulación para verificar cuanto tardó
@@ -22,6 +22,28 @@ print(nMO)
 	dir.create(guardar)
 	guardar<-paste(guardar,'/',horas,'-',I,sep='')
 	dir.create(guardar)
+
+	simulacion<-'/simM.R'
+	medio<-paste('/MFCmed',I,'.csv',sep='')
+	MO<-'/GeoM.xml'
+	funciones<-'/funciones.R'
+	#result<-'/resultadom.R'
+	#figuras<-'/figuras.R'
+
+	copiar<-c(simulacion,medio,funciones)#,result,figuras)#,MO) copiar el microorganismo solo si es necesario
+#Guardar una copia de los archivos que se usaron para construir la simulación 
+
+	for (x in copiar)
+	{
+		from=paste(ruta,x,sep='')
+		to=paste(guardar,x,sep='')
+		#if (x==result){
+		#file.rename(from,to)}else{
+		file.copy(from,to)#}
+	}
+
+
+
 	#Se carga el modelo del microorganismo
 	GEO<-readSBMLmod('geo.xml')
 GEO@react_id[533]<-'EX_ac__40__e__41__'
@@ -34,7 +56,8 @@ GEO@react_id[533]<-'EX_ac__40__e__41__'
 	#data('Ec_core')
 #Se carga el medio en el que se desarrollará el experimento
 	medium <- read.csv(paste('MFCmed',I,'.csv',sep=''))
-	geo<-Bac(GEO)#,chem='EX_elec')
+	geo<-Bac(GEO)#,deathrate=0.05)#,chem='EX_elec')
+	#geo@lpobj@problem@solver<-'glpkAPI'
 	geo@speed<-0
 #Geobacter tiene la capacidad de desplazarse en dirección al electrodo por el gradiente de elec.
 	#eco<-Bac(Ec_core)
@@ -55,18 +78,25 @@ GEO@react_id[533]<-'EX_ac__40__e__41__'
 	#arena<-addOrg(arena,bq,amount=nMO)
 	#arena<-addOrg(arena,cs,amount=nMO)
 	#arena<-addOrg(arena,ea,amount=nMO)
-	arena@orgdat$y[1]=1
-	arena@orgdat$y[2]=1
-	arena@orgdat$y[3]=1
-	arena@orgdat$y[4]=1
-	arena@orgdat$y[5]=1
-	arena@orgdat$x[1]=1
-	arena@orgdat$x[2]=2
-	arena@orgdat$x[3]=3
-	arena@orgdat$x[4]=4
-	arena@orgdat$x[5]=5
+#	arena@orgdat$y[1]=1
+#	arena@orgdat$x[1]=1
+#arena@orgdat$biomass[1]=1.2
+#	arena@orgdat$y[2]=2
+#	arena@orgdat$x[2]=2
+#arena@orgdat$biomass[2]=1.2
 
+#arena@orgdat$y[3]=3
+#	arena@orgdat$x[3]=1
+#arena@orgdat$biomass[3]=1.2
+#	arena@orgdat$y[4]=2
+#	arena@orgdat$x[4]=2
+#arena@orgdat$biomass[4]=1.2
 #	arena@orgdat$y[1]=m
+for (px in 1:nMO){
+	arena@orgdat$y[px]=1
+	arena@orgdat$x[px]=px
+	arena@orgdat$biomass[px]=0.4+px/nMO
+}
 	#Se carga el medio al espacio recien creado
 	arena <- addSubs(arena, smax=medium$Concentracion, mediac=medium$Sustancia, difspeed=medium$Difusividad,unit='fmol/cell')
 	vecb=matrix(nrow=length(arena@mediac),ncol=1,1) #La lleno con unos para sacarle el cuerpo a muchas cosas
@@ -106,7 +136,7 @@ GEO@react_id[533]<-'EX_ac__40__e__41__'
 	#Aqui se corre la simulación
 
 	print(arena@orgdat)
-	eva<-simEnvMod(arena,time=t,potspace=potspace,cutoff=1e-20,guardar=guardar,res=res,vecb=vecb,E0=E0,bf=bf,sec_obj='mtf')#,diff_par=TRUE)
+	eva<-simEnvMod(arena,time=t,potspace=potspace,cutoff=1e-20,guardar=guardar,res=res,vecb=vecb,E0=E0,bf=bf,sec_obj='mtf',bdes=bdes)#,diff_par=TRUE)
 
 	hora1=Sys.time()
 
@@ -115,25 +145,6 @@ GEO@react_id[533]<-'EX_ac__40__e__41__'
 	#En esta sección se crean copias de los archivos que se usaron para guardar todo en una misma carpeta con la fecha y hora, y poder llevar registros de los cambios en el proyecto
 	write(paste(horas,'\n',toString(hora1),'\n',toString(h),sep=''),paste(guardar,'/tiempo.txt',sep=''))
 	write(ruta,paste(guardar,'/ruta.txt',sep=''))
-	simulacion<-'/simM.R'
-	medio<-paste('/MFCmedM',I,'.csv',sep='')
-	MO<-'/GeoM.xml'
-	funciones<-'/funciones.R'
-	result<-'/resultadom.R'
-	figuras<-'/figuras.R'
-
-	copiar<-c(simulacion,medio,funciones,result,figuras)#,MO) copiar el microorganismo solo si es necesario
-#Guardar una copia de los archivos que se usaron para construir la simulación 
-
-	for (x in copiar)
-	{
-		from=paste(ruta,x,sep='')
-		to=paste(guardar,x,sep='')
-		if (x==result){
-		file.rename(from,to)}else{
-		file.copy(from,to)}
-	}
-
 	##Crear el archivo para mostrar los perfiles temporales
 #	new<-paste('cd', guardar,'\n','R CMD BATCH figuras.R result.R')
 #	write(new,paste(ruta,'/fig.sh',sep=''))
